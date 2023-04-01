@@ -17,14 +17,14 @@ jobs:
     steps:
     - uses: actions/checkout@v3
     - name: Build
-      run: cargo build --verbose
+      run: cargo build --verbose --lib
       env:
         SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
         SUPABASE_API_KEY: ${{ secrets.SUPABASE_API_KEY }}
         SUPABASE_TEST_EMAIL: ${{ secrets.SUPABASE_TEST_EMAIL }}
         SUPABASE_TEST_PASS: ${{ secrets.SUPABASE_TEST_PASS }}
     - name: Run tests
-      run: cargo test --verbose
+      run: cargo test --verbose --lib
       env:
         SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
         SUPABASE_API_KEY: ${{ secrets.SUPABASE_API_KEY }}
