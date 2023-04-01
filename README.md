@@ -17,10 +17,10 @@
 
 - [x] Client creation
 - [x] Sign-in email/pass
-- [ ] Signup email/pass
+- [x] Signup email/pass
 - [ ] Signup phone/pass
-- [ ] Token refresh
-- [ ] Logout
+- [x] Token refresh
+- [x] Logout
 - [ ] Verify one-time token
 - [ ] Authorize external OAuth provicder
 - [ ] Password recovery

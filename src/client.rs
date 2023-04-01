@@ -17,6 +17,19 @@ impl Supabase {
             client,
             url: url.to_string(),
             api_key: api_key.to_string(),
+            bearer_token: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_client() {
+        let client: Supabase = Supabase::new(None, None);
+        let url = std::env::var("SUPABASE_URL").unwrap_or_else(|_| String::new());
+        assert!(client.url == url);
     }
 }
