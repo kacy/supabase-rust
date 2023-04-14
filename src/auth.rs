@@ -1,3 +1,4 @@
+use jsonwebtoken::{DecodingKey, Validation, Algorithm, decode};
 use reqwest::{Error, Response};
 use serde::{Deserialize, Serialize};
 
@@ -14,7 +15,36 @@ pub struct RefreshToken {
     refresh_token: String,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Claims {
+    sub: String,
+    email: String,
+    exp: usize,
+}
+
 impl Supabase {
+    pub async fn jwt_valid(
+        &self,
+        jwt: &str,
+    ) -> Result<Claims, jsonwebtoken::errors::Error> {
+        let secret = self.jwt.clone();
+
+        let decoding_key = DecodingKey::from_secret(secret.as_ref()).into();
+        let validation = Validation::new(Algorithm::HS256);
+        let decoded_token = decode::<Claims>(&jwt, &decoding_key, &validation);
+
+        match decoded_token {
+            Ok(token_data) => {
+                println!("Token is valid. Claims: {:?}", token_data.claims);
+                Ok(token_data.claims)
+            }
+            Err(err) => {
+                println!("Error decoding token: {:?}", err);
+                Err(err)
+            }
+        }
+    }
+
     pub async fn sign_in_password(
         &self,
         email: &str,
@@ -91,7 +121,7 @@ mod tests {
     use super::*;
 
     async fn client() -> Supabase {
-        Supabase::new(None, None)
+        Supabase::new(None, None, None)
     }
 
     async fn sign_in_password() -> Response {
@@ -126,7 +156,7 @@ mod tests {
             println!("Skipping test_refresh() because automatic reuse detection is enabled in Supabase");
             return;
         }
-        
+
         let json_response: serde_json::Value = response.json().await.unwrap();
         let token: &str = json_response["access_token"].as_str().unwrap();
 
@@ -143,12 +173,11 @@ mod tests {
         client.bearer_token = Some(access_token.to_string());
 
         let response: Response = client.logout().await.unwrap();
-        print!("{:?}", response);
 
         assert!(response.status() == 204);
     }
 
-        #[tokio::test]
+    #[tokio::test]
     async fn test_signup_email_password() {
         use rand::{thread_rng, Rng, distributions::Alphanumeric};
 
@@ -166,9 +195,28 @@ mod tests {
         let test_email: String = random_email;
         let test_pass: String= random_pass;
         let response: Response = client.signup_email_password(&test_email, &test_pass).await.unwrap();
-        print!("{:?}", response);
 
         assert!(response.status() == 200);
+    }
+
+    #[tokio::test]
+    async fn test_authenticate_token() {
+        let client: Supabase = client().await;
+        let response: Response = sign_in_password().await;
+
+        let json_response: serde_json::Value = response.json().await.unwrap();
+        let token: &str = json_response["access_token"].as_str().unwrap();
+
+        let response = client.jwt_valid(token).await;
+
+        match response {
+            Ok(_) => {
+                assert!(true);
+            },
+            Err(_) => {
+                assert!(false);
+            }
+        }
     }
 
 }
