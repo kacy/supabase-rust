@@ -17,9 +17,19 @@ pub struct RefreshToken {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Claims {
-    sub: String,
-    email: String,
-    exp: usize,
+    pub sub: String,
+    pub email: String,
+    pub exp: usize,
+}
+
+impl Clone for Claims {
+    fn clone(&self) -> Self {
+        Self {
+            sub: self.sub.clone(),
+            email: self.email.clone(),
+            exp: self.exp,
+        }
+    }
 }
 
 impl Supabase {
