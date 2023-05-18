@@ -1,9 +1,10 @@
 use reqwest::{Client};
 
-mod auth;
+pub mod auth;
 mod client;
 mod db;
 
+#[derive(Clone, Debug)]
 pub struct Supabase {
     client: Client,
     url: String,
