@@ -1,11 +1,20 @@
-use std::{env};
-use reqwest::{Client};
+use std::env;
+use reqwest::{Client, Response, RequestBuilder};
+use async_trait::async_trait;
 
 use crate::Supabase;
 
+#[async_trait]
+pub trait Request {
+    async fn post(&self, sub_uri: &str, request_body: serde_json::Value) -> Response;
+    fn post_raw(&self, url: &str) -> RequestBuilder;
+    async fn get(&self, sub_uri: &str) -> Response;
+}
+
 impl Supabase {
-    // Creates a new Supabase client. If no parameters are provided, it will attempt to read the
-    // environment variables `SUPABASE_URL`, `SUPABASE_API_KEY`, and `SUPABASE_JWT_SECRET`.
+    /// Creates a new Supabase client. If no parameters are provided, it will attempt to read the
+    /// environment variables `SUPABASE_URL`, `SUPABASE_API_KEY`, and `SUPABASE_JWT_SECRET`.
+    /// Create new `Data` instance.
     pub fn new(url: Option<&str>, api_key: Option<&str>, jwt: Option<&str>) -> Self {
         let client: Client = Client::new();
         let url: String = url
@@ -28,6 +37,38 @@ impl Supabase {
     }
 }
 
+#[async_trait]
+impl Request for Supabase {
+    async fn post(&self, url: &str, request_body: serde_json::Value) -> Response {
+        self
+            .client
+            .post(url)
+            .header("apikey", &self.api_key)
+            .header("Content-Type", "application/json")
+            .json(&request_body)
+            .send()
+            .await
+            .unwrap()
+    }
+
+    fn post_raw(&self, url: &str) -> RequestBuilder {
+        self
+            .client
+            .post(url)
+            .header("apikey", &self.api_key)
+            .header("Content-Type", "application/json")
+    }
+
+    async fn get(&self, url: &str) -> Response {
+        self.client
+            .get(url)
+            .header("apikey", &self.api_key)
+            .header("Content-Type", "application/json")
+            .send()
+            .await
+            .unwrap()
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
