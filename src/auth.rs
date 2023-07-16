@@ -50,9 +50,9 @@ impl Supabase {
 
         Supabase {
             client,
-            url: url.to_string(),
-            api_key: api_key.to_string(),
-            jwt: jwt.to_string(),
+            url,
+            api_key,
+            jwt,
             bearer_token: None,
         }
     }

@@ -13,11 +13,7 @@ pub trait Request {
 #[async_trait]
 impl Request for Supabase {
     async fn post(&self, url: &str, request_body: serde_json::Value) -> Response {
-        self.post_raw(url)
-            .json(&request_body)
-            .send()
-            .await
-            .unwrap()
+        self.post_raw(url).json(&request_body).send().await.unwrap()
     }
 
     fn post_raw(&self, url: &str) -> RequestBuilder {
