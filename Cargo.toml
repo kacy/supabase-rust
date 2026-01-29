@@ -4,6 +4,8 @@ version = "0.1.2"
 authors = ["Kacy Fortner <kacy@kacyfortner.com>"]
 edition = "2021"
 description = "Rust client for Supabase"
+repository = "https://github.com/kacy/supabase-rust.git"
+homepage = "https://github.com/kacy/supabase-rust"
 license = "MIT"
 
 [dev-dependencies]
