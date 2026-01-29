@@ -249,7 +249,7 @@ impl Supabase {
     /// // Delete
     /// client.from("users").delete().eq("id", "123").execute().await?;
     /// ```
-    pub fn from(&self, table: impl Into<String>) -> QueryBuilder {
+    pub fn from(&self, table: impl Into<String>) -> QueryBuilder<'_> {
         QueryBuilder::new(self, table)
     }
 }
