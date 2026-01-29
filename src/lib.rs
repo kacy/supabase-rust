@@ -2,7 +2,7 @@ use reqwest::{Client};
 
 pub mod auth;
 mod client;
-mod db;
+pub mod db;
 
 #[derive(Clone, Debug)]
 pub struct Supabase {
