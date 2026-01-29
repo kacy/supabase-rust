@@ -226,12 +226,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_signup_email_password() {
-        use rand::distributions::Alphanumeric;
-        use rand::{thread_rng, Rng};
+        use rand::distr::Alphanumeric;
+        use rand::{rng, Rng};
 
         let client = client();
 
-        let rand_string: String = thread_rng()
+        let rand_string: String = rng()
             .sample_iter(&Alphanumeric)
             .take(20)
             .map(char::from)
