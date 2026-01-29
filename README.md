@@ -34,7 +34,7 @@
 - [ ] OAuth callback
 - [ ] All SSO
 - [ ] All Admin
-- [ ] All Database support
+- [x] Database support (CRUD operations with fluent query builder)
 
 ### Quickstart
 Add the following dependency to your toml file:
