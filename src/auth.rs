@@ -1,128 +1,114 @@
-use jsonwebtoken::{DecodingKey, Validation, Algorithm, decode};
+use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 use reqwest::{Error, Response};
 use serde::{Deserialize, Serialize};
 
 use crate::Supabase;
 
-#[derive(Serialize, Deserialize)]
-pub struct Password {
-    email: String,
-    password: String,
+#[derive(Serialize)]
+struct Credentials<'a> {
+    email: &'a str,
+    password: &'a str,
 }
 
-#[derive(Serialize, Deserialize)]
-pub struct RefreshToken {
-    refresh_token: String,
+#[derive(Serialize)]
+struct RefreshTokenRequest<'a> {
+    refresh_token: &'a str,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+/// JWT claims extracted from a valid token.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Claims {
     pub sub: String,
     pub email: String,
     pub exp: usize,
 }
 
-impl Clone for Claims {
-    fn clone(&self) -> Self {
-        Self {
-            sub: self.sub.clone(),
-            email: self.email.clone(),
-            exp: self.exp,
-        }
+/// Error returned when logout fails due to missing bearer token.
+#[derive(Debug)]
+pub struct LogoutError;
+
+impl std::fmt::Display for LogoutError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "bearer token required for logout")
     }
 }
 
+impl std::error::Error for LogoutError {}
+
 impl Supabase {
-    pub async fn jwt_valid(
-        &self,
-        jwt: &str,
-    ) -> Result<Claims, jsonwebtoken::errors::Error> {
-        let secret = self.jwt.clone();
-
-        let decoding_key = DecodingKey::from_secret(secret.as_ref()).into();
+    /// Validates a JWT token and returns its claims.
+    ///
+    /// Returns an error if the token is invalid or expired.
+    pub fn jwt_valid(&self, jwt: &str) -> Result<Claims, jsonwebtoken::errors::Error> {
+        let decoding_key = DecodingKey::from_secret(self.jwt.as_bytes());
         let validation = Validation::new(Algorithm::HS256);
-        let decoded_token = decode::<Claims>(&jwt, &decoding_key, &validation);
-
-        match decoded_token {
-            Ok(token_data) => {
-                println!("Token is valid. Claims: {:?}", token_data.claims);
-                Ok(token_data.claims)
-            }
-            Err(err) => {
-                println!("Error decoding token: {:?}", err);
-                Err(err)
-            }
-        }
+        let token_data = decode::<Claims>(jwt, &decoding_key, &validation)?;
+        Ok(token_data.claims)
     }
 
-    pub async fn sign_in_password(
-        &self,
-        email: &str,
-        password: &str,
-    ) -> Result<Response, Error> {
-        let request_url: String = format!("{}/auth/v1/token?grant_type=password", self.url);
-        let response: Response = self
-            .client
-            .post(&request_url)
+    /// Signs in a user with email and password.
+    ///
+    /// Returns the response containing access and refresh tokens.
+    pub async fn sign_in_password(&self, email: &str, password: &str) -> Result<Response, Error> {
+        let url = format!("{}/auth/v1/token?grant_type=password", self.url);
+
+        self.client
+            .post(&url)
             .header("apikey", &self.api_key)
             .header("Content-Type", "application/json")
-            .json(&Password {
-                email: email.to_string(),
-                password: password.to_string(),
-            })
+            .json(&Credentials { email, password })
             .send()
-            .await?;
-        Ok(response)
+            .await
     }
 
-    // This test will fail unless you disable "Enable automatic reuse detection" in Supabase
+    /// Refreshes an access token using a refresh token.
+    ///
+    /// Note: This may fail if "Enable automatic reuse detection" is enabled in Supabase.
     pub async fn refresh_token(&self, refresh_token: &str) -> Result<Response, Error> {
-        let request_url: String = format!("{}/auth/v1/token?grant_type=refresh_token", self.url);
-        let response: Response = self
-            .client
-            .post(&request_url)
+        let url = format!("{}/auth/v1/token?grant_type=refresh_token", self.url);
+
+        self.client
+            .post(&url)
             .header("apikey", &self.api_key)
             .header("Content-Type", "application/json")
-            .json(&RefreshToken {
-                refresh_token: refresh_token.to_string(),
-            })
+            .json(&RefreshTokenRequest { refresh_token })
             .send()
-            .await?;
-        Ok(response)
+            .await
     }
 
-    pub async fn logout(&self) -> Result<Response, Error> {
-        let request_url: String = format!("{}/auth/v1/logout", self.url);
-        let token = self.bearer_token.clone().unwrap();
-        let response: Response = self
+    /// Logs out the current user.
+    ///
+    /// Requires a bearer token to be set on the client.
+    /// Returns `Err(LogoutError)` if no bearer token is set.
+    pub async fn logout(&self) -> Result<Result<Response, Error>, LogoutError> {
+        let token = self.bearer_token.as_ref().ok_or(LogoutError)?;
+        let url = format!("{}/auth/v1/logout", self.url);
+
+        Ok(self
             .client
-            .post(&request_url)
+            .post(&url)
             .header("apikey", &self.api_key)
             .header("Content-Type", "application/json")
             .bearer_auth(token)
             .send()
-            .await?;
-        Ok(response)
+            .await)
     }
 
+    /// Signs up a new user with email and password.
     pub async fn signup_email_password(
         &self,
         email: &str,
         password: &str,
     ) -> Result<Response, Error> {
-        let request_url: String = format!("{}/auth/v1/signup", self.url);
-        let response: Response = self
-            .client
-            .post(&request_url)
+        let url = format!("{}/auth/v1/signup", self.url);
+
+        self.client
+            .post(&url)
             .header("apikey", &self.api_key)
             .header("Content-Type", "application/json")
-            .json(&Password {
-                email: email.to_string(),
-                password: password.to_string(),
-            })
+            .json(&Credentials { email, password })
             .send()
-            .await?;
-        Ok(response)
+            .await
     }
 }
 
@@ -130,15 +116,14 @@ impl Supabase {
 mod tests {
     use super::*;
 
-    async fn client() -> Supabase {
+    fn client() -> Supabase {
         Supabase::new(None, None, None)
     }
 
     async fn sign_in_password() -> Result<Response, Error> {
-        let client: Supabase = client().await;
-
-        let test_email: String = std::env::var("SUPABASE_TEST_EMAIL").unwrap_or_else(|_| String::new());
-        let test_pass: String = std::env::var("SUPABASE_TEST_PASS").unwrap_or_else(|_| String::new());
+        let client = client();
+        let test_email = std::env::var("SUPABASE_TEST_EMAIL").unwrap_or_default();
+        let test_pass = std::env::var("SUPABASE_TEST_PASS").unwrap_or_default();
         client.sign_in_password(&test_email, &test_pass).await
     }
 
@@ -147,22 +132,24 @@ mod tests {
         let response = match sign_in_password().await {
             Ok(resp) => resp,
             Err(e) => {
-                println!("Test skipped due to network error: {}", e);
+                println!("Test skipped due to network error: {e}");
                 return;
             }
         };
 
-        let json_response: serde_json::Value = response.json().await.unwrap();
-        let token = json_response["access_token"].as_str();
-        let refresh_token = json_response["refresh_token"].as_str();
+        let json: serde_json::Value = response.json().await.unwrap();
 
-        if token.is_none() || refresh_token.is_none() {
+        let Some(token) = json["access_token"].as_str() else {
             println!("Test skipped: invalid credentials or server response");
             return;
-        }
+        };
+        let Some(refresh) = json["refresh_token"].as_str() else {
+            println!("Test skipped: invalid credentials or server response");
+            return;
+        };
 
-        assert!(!token.unwrap().is_empty());
-        assert!(!refresh_token.unwrap().is_empty());
+        assert!(!token.is_empty());
+        assert!(!refresh.is_empty());
     }
 
     #[tokio::test]
@@ -170,40 +157,34 @@ mod tests {
         let response = match sign_in_password().await {
             Ok(resp) => resp,
             Err(e) => {
-                println!("Test skipped due to network error: {}", e);
+                println!("Test skipped due to network error: {e}");
                 return;
             }
         };
 
-        let json_response: serde_json::Value = response.json().await.unwrap();
-        let refresh_token = match json_response["refresh_token"].as_str() {
-            Some(t) => t,
-            None => {
-                println!("Test skipped: no refresh token in response");
-                return;
-            }
+        let json: serde_json::Value = response.json().await.unwrap();
+        let Some(refresh_token) = json["refresh_token"].as_str() else {
+            println!("Test skipped: no refresh token in response");
+            return;
         };
 
-        let response = match client().await.refresh_token(refresh_token).await {
+        let response = match client().refresh_token(refresh_token).await {
             Ok(resp) => resp,
             Err(e) => {
-                println!("Test skipped due to network error: {}", e);
+                println!("Test skipped due to network error: {e}");
                 return;
             }
         };
 
         if response.status() == 400 {
-            println!("Skipping test_refresh() because automatic reuse detection is enabled in Supabase");
+            println!("Skipping: automatic reuse detection is enabled");
             return;
         }
 
-        let json_response: serde_json::Value = response.json().await.unwrap();
-        let token = match json_response["access_token"].as_str() {
-            Some(t) => t,
-            None => {
-                println!("Test skipped: no access token in refresh response");
-                return;
-            }
+        let json: serde_json::Value = response.json().await.unwrap();
+        let Some(token) = json["access_token"].as_str() else {
+            println!("Test skipped: no access token in refresh response");
+            return;
         };
 
         assert!(!token.is_empty());
@@ -214,39 +195,41 @@ mod tests {
         let response = match sign_in_password().await {
             Ok(resp) => resp,
             Err(e) => {
-                println!("Test skipped due to network error: {}", e);
+                println!("Test skipped due to network error: {e}");
                 return;
             }
         };
 
-        let json_response: serde_json::Value = response.json().await.unwrap();
-        let access_token = match json_response["access_token"].as_str() {
-            Some(t) => t,
-            None => {
-                println!("Test skipped: no access token in response");
-                return;
-            }
+        let json: serde_json::Value = response.json().await.unwrap();
+        let Some(access_token) = json["access_token"].as_str() else {
+            println!("Test skipped: no access token in response");
+            return;
         };
 
-        let mut client: Supabase = client().await;
-        client.bearer_token = Some(access_token.to_string());
+        let mut client = client();
+        client.set_bearer_token(access_token);
 
         let response = match client.logout().await {
-            Ok(resp) => resp,
+            Ok(Ok(resp)) => resp,
+            Ok(Err(e)) => {
+                println!("Test skipped due to network error: {e}");
+                return;
+            }
             Err(e) => {
-                println!("Test skipped due to network error: {}", e);
+                println!("Test skipped: {e}");
                 return;
             }
         };
 
-        assert!(response.status() == 204);
+        assert_eq!(response.status(), 204);
     }
 
     #[tokio::test]
     async fn test_signup_email_password() {
-        use rand::{thread_rng, Rng, distributions::Alphanumeric};
+        use rand::distributions::Alphanumeric;
+        use rand::{thread_rng, Rng};
 
-        let client: Supabase = client().await;
+        let client = client();
 
         let rand_string: String = thread_rng()
             .sample_iter(&Alphanumeric)
@@ -254,53 +237,43 @@ mod tests {
             .map(char::from)
             .collect();
 
-        let random_email: String = format!("{}@a-rust-domain-that-does-not-exist.com", rand_string);
-        let random_pass: String = rand_string;
+        let email = format!("{rand_string}@a-rust-domain-that-does-not-exist.com");
 
-        let test_email: String = random_email;
-        let test_pass: String = random_pass;
-
-        let response = match client.signup_email_password(&test_email, &test_pass).await {
+        let response = match client.signup_email_password(&email, &rand_string).await {
             Ok(resp) => resp,
             Err(e) => {
-                println!("Test skipped due to network error: {}", e);
+                println!("Test skipped due to network error: {e}");
                 return;
             }
         };
 
-        assert!(response.status() == 200);
+        assert_eq!(response.status(), 200);
     }
 
     #[tokio::test]
     async fn test_authenticate_token() {
-        let client: Supabase = client().await;
+        let client = client();
 
         let response = match sign_in_password().await {
             Ok(resp) => resp,
             Err(e) => {
-                println!("Test skipped due to network error: {}", e);
+                println!("Test skipped due to network error: {e}");
                 return;
             }
         };
 
-        let json_response: serde_json::Value = response.json().await.unwrap();
-        let token = match json_response["access_token"].as_str() {
-            Some(t) => t,
-            None => {
-                println!("Test skipped: no access token in response");
-                return;
-            }
+        let json: serde_json::Value = response.json().await.unwrap();
+        let Some(token) = json["access_token"].as_str() else {
+            println!("Test skipped: no access token in response");
+            return;
         };
 
-        let response = client.jwt_valid(token).await;
+        assert!(client.jwt_valid(token).is_ok());
+    }
 
-        match response {
-            Ok(_) => {
-                assert!(true);
-            },
-            Err(_) => {
-                assert!(false);
-            }
-        }
+    #[test]
+    fn test_logout_requires_bearer_token() {
+        // Verify the error type displays correctly
+        assert_eq!(format!("{}", LogoutError), "bearer token required for logout");
     }
 }

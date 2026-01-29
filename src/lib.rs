@@ -1,4 +1,4 @@
-use reqwest::{Client};
+use reqwest::Client;
 
 pub mod auth;
 mod client;
