@@ -77,19 +77,33 @@ mod tests {
 
     #[test]
     fn test_client_missing_url() {
-        // When no URL is provided and env var is not set, should return Error::Config
+        // Temporarily remove the env var so the constructor can't fall back to it
+        let saved = env::var("SUPABASE_URL").ok();
+        env::remove_var("SUPABASE_URL");
+
         let result = Supabase::new(None, Some("key"), None);
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(matches!(err, crate::Error::Config(_)));
+
+        if let Some(val) = saved {
+            env::set_var("SUPABASE_URL", val);
+        }
     }
 
     #[test]
     fn test_client_missing_api_key() {
+        let saved = env::var("SUPABASE_API_KEY").ok();
+        env::remove_var("SUPABASE_API_KEY");
+
         let result = Supabase::new(Some("https://example.supabase.co"), None, None);
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(matches!(err, crate::Error::Config(_)));
+
+        if let Some(val) = saved {
+            env::set_var("SUPABASE_API_KEY", val);
+        }
     }
 
     #[test]
