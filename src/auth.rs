@@ -35,6 +35,34 @@ impl std::fmt::Display for LogoutError {
 
 impl std::error::Error for LogoutError {}
 
+#[derive(Serialize)]
+struct PhoneCredentials<'a> {
+    phone: &'a str,
+    password: &'a str,
+}
+
+#[derive(Serialize)]
+struct OtpRequest<'a> {
+    phone: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    channel: Option<&'a str>,
+}
+
+#[derive(Serialize)]
+struct VerifyOtpRequest<'a> {
+    phone: &'a str,
+    token: &'a str,
+    #[serde(rename = "type")]
+    verification_type: &'a str,
+}
+
+#[derive(Serialize)]
+struct ResendOtpRequest<'a> {
+    phone: &'a str,
+    #[serde(rename = "type")]
+    verification_type: &'a str,
+}
+
 impl Supabase {
     /// Validates a JWT token and returns its claims.
     ///
@@ -92,6 +120,86 @@ impl Supabase {
             .bearer_auth(token)
             .send()
             .await)
+    }
+
+    /// Signs up a new user with phone and password.
+    pub async fn signup_phone_password(
+        &self,
+        phone: &str,
+        password: &str,
+    ) -> Result<Response, Error> {
+        let url = format!("{}/auth/v1/signup", self.url);
+
+        self.client
+            .post(&url)
+            .header("apikey", &self.api_key)
+            .header("Content-Type", "application/json")
+            .json(&PhoneCredentials { phone, password })
+            .send()
+            .await
+    }
+
+    /// Sends a one-time password to the given phone number.
+    ///
+    /// The `channel` parameter can be `"sms"` or `"whatsapp"`. Defaults to SMS when `None`.
+    pub async fn sign_in_otp(
+        &self,
+        phone: &str,
+        channel: Option<&str>,
+    ) -> Result<Response, Error> {
+        let url = format!("{}/auth/v1/otp", self.url);
+
+        self.client
+            .post(&url)
+            .header("apikey", &self.api_key)
+            .header("Content-Type", "application/json")
+            .json(&OtpRequest { phone, channel })
+            .send()
+            .await
+    }
+
+    /// Verifies a one-time password token.
+    ///
+    /// Returns access and refresh tokens on success.
+    pub async fn verify_otp(
+        &self,
+        phone: &str,
+        token: &str,
+        verification_type: &str,
+    ) -> Result<Response, Error> {
+        let url = format!("{}/auth/v1/verify", self.url);
+
+        self.client
+            .post(&url)
+            .header("apikey", &self.api_key)
+            .header("Content-Type", "application/json")
+            .json(&VerifyOtpRequest {
+                phone,
+                token,
+                verification_type,
+            })
+            .send()
+            .await
+    }
+
+    /// Resends a one-time password to the given phone number.
+    pub async fn resend_otp(
+        &self,
+        phone: &str,
+        verification_type: &str,
+    ) -> Result<Response, Error> {
+        let url = format!("{}/auth/v1/resend", self.url);
+
+        self.client
+            .post(&url)
+            .header("apikey", &self.api_key)
+            .header("Content-Type", "application/json")
+            .json(&ResendOtpRequest {
+                phone,
+                verification_type,
+            })
+            .send()
+            .await
     }
 
     /// Signs up a new user with email and password.
@@ -275,5 +383,71 @@ mod tests {
     fn test_logout_requires_bearer_token() {
         // Verify the error type displays correctly
         assert_eq!(format!("{}", LogoutError), "bearer token required for logout");
+    }
+
+    #[tokio::test]
+    async fn test_signup_phone_password() {
+        let client = client();
+
+        let response = match client.signup_phone_password("+10000000000", "test-password-123").await
+        {
+            Ok(resp) => resp,
+            Err(e) => {
+                println!("Test skipped due to network error: {e}");
+                return;
+            }
+        };
+
+        let status = response.status().as_u16();
+        assert!(
+            status == 200 || status == 422 || status == 401 || status == 403,
+            "unexpected status: {status}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_sign_in_otp() {
+        let client = client();
+
+        let response = match client.sign_in_otp("+10000000000", Some("sms")).await {
+            Ok(resp) => resp,
+            Err(e) => {
+                println!("Test skipped due to network error: {e}");
+                return;
+            }
+        };
+
+        // OTP endpoint should return a response (success or error depending on config)
+        let _status = response.status();
+    }
+
+    #[tokio::test]
+    async fn test_verify_otp() {
+        let client = client();
+
+        let response = match client.verify_otp("+10000000000", "000000", "sms").await {
+            Ok(resp) => resp,
+            Err(e) => {
+                println!("Test skipped due to network error: {e}");
+                return;
+            }
+        };
+
+        let _status = response.status();
+    }
+
+    #[tokio::test]
+    async fn test_resend_otp() {
+        let client = client();
+
+        let response = match client.resend_otp("+10000000000", "sms").await {
+            Ok(resp) => resp,
+            Err(e) => {
+                println!("Test skipped due to network error: {e}");
+                return;
+            }
+        };
+
+        let _status = response.status();
     }
 }
