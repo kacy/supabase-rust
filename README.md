@@ -10,8 +10,8 @@
 [crates-url]: https://crates.io/crates/supabase-rust
 [mit-badge]: https://img.shields.io/badge/license-MIT-blue.svg
 [mit-url]: https://github.com/kacy/supabase-rust/blob/master/LICENSE
-[actions-badge]: https://github.com/kacy/supabase-rust/workflows/CI/badge.svg
-[actions-url]: https://github.com/kacy/supabase-rust/actions?query=workflow%3ACI+branch%3Amaster
+[actions-badge]: https://github.com/kacy/supabase-rust/workflows/Rust/badge.svg
+[actions-url]: https://github.com/kacy/supabase-rust/actions?query=workflow%3ARust+branch%3Amaster
 
 ## Features
 
