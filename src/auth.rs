@@ -36,6 +36,11 @@ impl std::fmt::Display for LogoutError {
 impl std::error::Error for LogoutError {}
 
 #[derive(Serialize)]
+struct RecoverRequest<'a> {
+    email: &'a str,
+}
+
+#[derive(Serialize)]
 struct PhoneCredentials<'a> {
     phone: &'a str,
     password: &'a str,
@@ -120,6 +125,19 @@ impl Supabase {
             .bearer_auth(token)
             .send()
             .await)
+    }
+
+    /// Sends a password recovery email to the given address.
+    pub async fn recover_password(&self, email: &str) -> Result<Response, Error> {
+        let url = format!("{}/auth/v1/recover", self.url);
+
+        self.client
+            .post(&url)
+            .header("apikey", &self.api_key)
+            .header("Content-Type", "application/json")
+            .json(&RecoverRequest { email })
+            .send()
+            .await
     }
 
     /// Signs up a new user with phone and password.
@@ -383,6 +401,24 @@ mod tests {
     fn test_logout_requires_bearer_token() {
         // Verify the error type displays correctly
         assert_eq!(format!("{}", LogoutError), "bearer token required for logout");
+    }
+
+    #[tokio::test]
+    async fn test_recover_password() {
+        let client = client();
+
+        let response = match client
+            .recover_password("test@a-rust-domain-that-does-not-exist.com")
+            .await
+        {
+            Ok(resp) => resp,
+            Err(e) => {
+                println!("Test skipped due to network error: {e}");
+                return;
+            }
+        };
+
+        let _status = response.status();
     }
 
     #[tokio::test]
