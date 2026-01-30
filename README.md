@@ -15,14 +15,15 @@
 
 ## Features
 
-- [x] Client creation
-- [x] Sign-in email/pass
+- [x] Client creation with validation
+- [x] Unified error type (`supabase_rust::Error`)
+- [x] Sign-in email/pass (returns typed `AuthResponse`)
 - [x] Signup email/pass
 - [x] Signup phone/pass
 - [x] Token refresh
 - [x] Logout
 - [x] Verify one-time token
-- [ ] Authorize external OAuth provicder
+- [ ] Authorize external OAuth provider
 - [x] Password recovery
 - [x] Resend one-time password over email or SMS
 - [ ] Magic link authentication
@@ -41,62 +42,73 @@
 Add the following dependency to your `Cargo.toml`:
 ```toml
 [dependencies]
-supabase-rust = "0.1.2"
+supabase-rust = "0.3"
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 ```
 
 ### Client Initialization
 
-You can initialize the client with explicit values or via environment variables:
+You can initialize the client with explicit values or via environment variables.
+`Supabase::new()` returns a `Result` and will return an error if the URL or API
+key is missing.
 
 ```rust
 use supabase_rust::Supabase;
 
 // Option 1: Using environment variables
 // Set SUPABASE_URL, SUPABASE_API_KEY, and optionally SUPABASE_JWT_SECRET
-let client = Supabase::new(None, None, None);
+let client = Supabase::new(None, None, None)?;
 
 // Option 2: Explicit configuration
 let client = Supabase::new(
     Some("https://your-project.supabase.co"),
     Some("your-api-key"),
     Some("your-jwt-secret"),
-);
+)?;
 ```
 
 ## Usage
 
 ### Authentication
 
+Auth methods return typed responses: `AuthResponse` (with `access_token`,
+`refresh_token`, etc.) or `EmptyResponse` (with `status`). Non-2xx responses
+are automatically converted to `Error::Api`.
+
 ```rust
-use supabase_rust::Supabase;
+use supabase_rust::{Supabase, AuthResponse, Error};
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let client = Supabase::new(None, None, None);
+async fn main() -> Result<(), Error> {
+    let client = Supabase::new(None, None, None)?;
 
     // Sign up a new user
-    let response = client
+    let auth: AuthResponse = client
         .signup_email_password("user@example.com", "password123")
         .await?;
 
     // Sign in with email and password
-    let response = client
+    let auth: AuthResponse = client
         .sign_in_password("user@example.com", "password123")
         .await?;
 
-    // Parse the response to get tokens
-    let json: serde_json::Value = response.json().await?;
-    let access_token = json["access_token"].as_str().unwrap();
-    let refresh_token = json["refresh_token"].as_str().unwrap();
+    // Access tokens directly from the typed response
+    println!("Access token: {}", auth.access_token);
+    println!("Refresh token: {}", auth.refresh_token);
 
     // Refresh an access token
-    let response = client.refresh_token(refresh_token).await?;
+    let refreshed: AuthResponse = client.refresh_token(&auth.refresh_token).await?;
 
-    // Validate a JWT token
-    let claims = client.jwt_valid(access_token).await?;
+    // Validate a JWT token (synchronous)
+    let claims = client.jwt_valid(&auth.access_token)?;
     println!("User email: {}", claims.email);
+
+    // Logout (requires a bearer token)
+    let mut client = client;
+    client.set_bearer_token(&auth.access_token);
+    let resp = client.logout().await?;
+    println!("Logged out with status: {}", resp.status);
 
     Ok(())
 }
@@ -104,10 +116,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ### Database Operations
 
-The library provides a fluent query builder for PostgREST database operations:
+The library provides a fluent query builder for PostgREST database operations.
+The `QueryBuilder` is annotated with `#[must_use]` so the compiler will warn if
+you forget to call `.execute()`.
 
 ```rust
-use supabase_rust::Supabase;
+use supabase_rust::{Supabase, Error};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -126,16 +140,15 @@ struct NewUser {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let client = Supabase::new(None, None, None);
+async fn main() -> Result<(), Error> {
+    let client = Supabase::new(None, None, None)?;
 
-    // SELECT: Get all users
-    let response = client
+    // SELECT: Get all users (automatic JSON deserialization)
+    let users: Vec<User> = client
         .from("users")
         .select("*")
-        .execute()
+        .execute_and_parse()
         .await?;
-    let users: Vec<User> = response.json().await?;
 
     // SELECT: Get specific columns with filters
     let response = client
@@ -155,7 +168,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let response = client
         .from("users")
-        .insert(&new_user)
+        .insert(&new_user)?
         .execute()
         .await?;
 
@@ -165,7 +178,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
     let response = client
         .from("users")
-        .update(&updates)
+        .update(&updates)?
         .eq("id", "123")
         .execute()
         .await?;
@@ -217,12 +230,26 @@ let response = client
     .gte("price", "10")
     .lte("price", "100")
     .neq("status", "discontinued")
-    .in_("category", &["electronics", "accessories"])
+    .in_("category", ["electronics", "accessories"])
     .order("price.desc")
     .limit(20)
     .execute()
     .await?;
 ```
+
+## Error Handling
+
+All operations return `Result<T, supabase_rust::Error>`. The error type has the
+following variants:
+
+| Variant | Description |
+|---------|-------------|
+| `Error::Config(String)` | Missing URL or API key at construction |
+| `Error::Request(reqwest::Error)` | HTTP transport failure |
+| `Error::Serialization(serde_json::Error)` | JSON serialization/deserialization failure |
+| `Error::Jwt(jsonwebtoken::errors::Error)` | JWT validation failure |
+| `Error::AuthRequired(String)` | Operation requires a bearer token |
+| `Error::Api { status, message }` | Non-2xx HTTP response from Supabase |
 
 ## Tips
 The Supabase team has an outline of their OpenAPI specs over in [this yaml file](https://github.com/supabase/gotrue/blob/master/openapi.yaml).
