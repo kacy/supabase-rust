@@ -1,50 +1,15 @@
-use reqwest::{Error, Method, Response};
-use serde::Serialize;
+use reqwest::{Method, Response};
+use serde::{de::DeserializeOwned, Serialize};
 
 use crate::Supabase;
-
-/// Error type for database operations.
-#[derive(Debug)]
-pub enum DbError {
-    /// Failed to serialize data to JSON.
-    Serialization(serde_json::Error),
-    /// HTTP request failed.
-    Request(Error),
-}
-
-impl std::fmt::Display for DbError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Serialization(e) => write!(f, "serialization error: {e}"),
-            Self::Request(e) => write!(f, "request error: {e}"),
-        }
-    }
-}
-
-impl std::error::Error for DbError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Serialization(e) => Some(e),
-            Self::Request(e) => Some(e),
-        }
-    }
-}
-
-impl From<serde_json::Error> for DbError {
-    fn from(err: serde_json::Error) -> Self {
-        Self::Serialization(err)
-    }
-}
-
-impl From<Error> for DbError {
-    fn from(err: Error) -> Self {
-        Self::Request(err)
-    }
-}
 
 /// Query builder for PostgREST database operations.
 ///
 /// Provides a fluent API for constructing and executing database queries.
+///
+/// Use [`execute()`](Self::execute) to get the raw response, or
+/// [`execute_and_parse()`](Self::execute_and_parse) to deserialize the JSON body.
+#[must_use = "a QueryBuilder does nothing until .execute() or .execute_and_parse() is called"]
 pub struct QueryBuilder<'a> {
     client: &'a Supabase,
     table: String,
@@ -77,7 +42,7 @@ impl<'a> QueryBuilder<'a> {
     /// Prepares an insert operation with the provided data.
     ///
     /// Data will be serialized to JSON. Call `execute()` to run the query.
-    pub fn insert<T: Serialize>(mut self, data: &T) -> Result<Self, serde_json::Error> {
+    pub fn insert<T: Serialize>(mut self, data: &T) -> Result<Self, crate::Error> {
         self.method = Method::POST;
         self.body = Some(serde_json::to_string(data)?);
         Ok(self)
@@ -86,7 +51,7 @@ impl<'a> QueryBuilder<'a> {
     /// Prepares an update operation with the provided data.
     ///
     /// Should be combined with filter methods to target specific rows.
-    pub fn update<T: Serialize>(mut self, data: &T) -> Result<Self, serde_json::Error> {
+    pub fn update<T: Serialize>(mut self, data: &T) -> Result<Self, crate::Error> {
         self.method = Method::PATCH;
         self.body = Some(serde_json::to_string(data)?);
         Ok(self)
@@ -188,8 +153,10 @@ impl<'a> QueryBuilder<'a> {
         self
     }
 
-    /// Executes the query and returns the response.
-    pub async fn execute(self) -> Result<Response, Error> {
+    /// Executes the query and returns the raw response.
+    ///
+    /// Returns `Error::Api` if the server responds with a non-2xx status code.
+    pub async fn execute(self) -> Result<Response, crate::Error> {
         let url = format!("{}/rest/v1/{}", self.client.url, self.table);
 
         let mut request = self
@@ -211,7 +178,26 @@ impl<'a> QueryBuilder<'a> {
             request = request.body(body);
         }
 
-        request.send().await
+        let resp = request.send().await?;
+
+        let status = resp.status().as_u16();
+        if !(200..300).contains(&status) {
+            let message = resp.text().await.unwrap_or_default();
+            return Err(crate::Error::Api { status, message });
+        }
+
+        Ok(resp)
+    }
+
+    /// Executes the query and deserializes the JSON response body into `T`.
+    ///
+    /// This is a convenience wrapper around [`execute()`](Self::execute) that
+    /// also parses the response body.
+    pub async fn execute_and_parse<T: DeserializeOwned>(self) -> Result<T, crate::Error> {
+        let resp = self.execute().await?;
+        let body = resp.text().await?;
+        let parsed: T = serde_json::from_str(&body)?;
+        Ok(parsed)
     }
 
     fn add_filter(
@@ -260,7 +246,23 @@ mod tests {
     use serde::{Deserialize, Serialize};
 
     fn client() -> Supabase {
-        Supabase::new(None, None, None)
+        Supabase::new(None, None, None).unwrap_or_else(|_| {
+            Supabase::new(
+                Some("https://example.supabase.co"),
+                Some("test-key"),
+                None,
+            )
+            .unwrap()
+        })
+    }
+
+    /// Helper: returns true if the error is acceptable for tests running without
+    /// a real Supabase backend (network errors or 401 API errors).
+    fn is_acceptable_error(err: &crate::Error) -> bool {
+        matches!(
+            err,
+            crate::Error::Request(_) | crate::Error::Api { status: 401, .. }
+        )
     }
 
     #[derive(Debug, Serialize, Deserialize)]
@@ -273,16 +275,12 @@ mod tests {
     async fn test_select() {
         let client = client();
 
-        let result = client.from("test_items").select("*").execute().await;
-
-        match result {
-            Ok(resp) => {
-                let status = resp.status();
-                assert!(status.is_success() || status.as_u16() == 401);
+        match client.from("test_items").select("*").execute().await {
+            Ok(_resp) => {}
+            Err(e) if is_acceptable_error(&e) => {
+                println!("Test skipped: {e}");
             }
-            Err(e) => {
-                println!("Test skipped due to network error: {e}");
-            }
+            Err(e) => panic!("unexpected error: {e}"),
         }
     }
 
@@ -290,16 +288,12 @@ mod tests {
     async fn test_select_columns() {
         let client = client();
 
-        let result = client.from("test_items").select("id,name").execute().await;
-
-        match result {
-            Ok(resp) => {
-                let status = resp.status();
-                assert!(status.is_success() || status.as_u16() == 401);
+        match client.from("test_items").select("id,name").execute().await {
+            Ok(_resp) => {}
+            Err(e) if is_acceptable_error(&e) => {
+                println!("Test skipped: {e}");
             }
-            Err(e) => {
-                println!("Test skipped due to network error: {e}");
-            }
+            Err(e) => panic!("unexpected error: {e}"),
         }
     }
 
@@ -307,21 +301,18 @@ mod tests {
     async fn test_select_with_filter() {
         let client = client();
 
-        let result = client
+        match client
             .from("test_items")
             .select("*")
             .eq("name", "test")
             .execute()
-            .await;
-
-        match result {
-            Ok(resp) => {
-                let status = resp.status();
-                assert!(status.is_success() || status.as_u16() == 401);
+            .await
+        {
+            Ok(_resp) => {}
+            Err(e) if is_acceptable_error(&e) => {
+                println!("Test skipped: {e}");
             }
-            Err(e) => {
-                println!("Test skipped due to network error: {e}");
-            }
+            Err(e) => panic!("unexpected error: {e}"),
         }
     }
 
@@ -334,21 +325,18 @@ mod tests {
             value: 42,
         };
 
-        let result = client
+        match client
             .from("test_items")
             .insert(&item)
             .expect("serialization should succeed")
             .execute()
-            .await;
-
-        match result {
-            Ok(resp) => {
-                let status = resp.status();
-                assert!(status.is_success() || status.as_u16() == 401);
+            .await
+        {
+            Ok(_resp) => {}
+            Err(e) if is_acceptable_error(&e) => {
+                println!("Test skipped: {e}");
             }
-            Err(e) => {
-                println!("Test skipped due to network error: {e}");
-            }
+            Err(e) => panic!("unexpected error: {e}"),
         }
     }
 
@@ -358,22 +346,19 @@ mod tests {
 
         let updates = serde_json::json!({ "value": 100 });
 
-        let result = client
+        match client
             .from("test_items")
             .update(&updates)
             .expect("serialization should succeed")
             .eq("name", "test_item")
             .execute()
-            .await;
-
-        match result {
-            Ok(resp) => {
-                let status = resp.status();
-                assert!(status.is_success() || status.as_u16() == 401);
+            .await
+        {
+            Ok(_resp) => {}
+            Err(e) if is_acceptable_error(&e) => {
+                println!("Test skipped: {e}");
             }
-            Err(e) => {
-                println!("Test skipped due to network error: {e}");
-            }
+            Err(e) => panic!("unexpected error: {e}"),
         }
     }
 
@@ -381,21 +366,18 @@ mod tests {
     async fn test_delete() {
         let client = client();
 
-        let result = client
+        match client
             .from("test_items")
             .delete()
             .eq("name", "test_item")
             .execute()
-            .await;
-
-        match result {
-            Ok(resp) => {
-                let status = resp.status();
-                assert!(status.is_success() || status.as_u16() == 401);
+            .await
+        {
+            Ok(_resp) => {}
+            Err(e) if is_acceptable_error(&e) => {
+                println!("Test skipped: {e}");
             }
-            Err(e) => {
-                println!("Test skipped due to network error: {e}");
-            }
+            Err(e) => panic!("unexpected error: {e}"),
         }
     }
 
@@ -403,22 +385,19 @@ mod tests {
     async fn test_select_with_order_and_limit() {
         let client = client();
 
-        let result = client
+        match client
             .from("test_items")
             .select("*")
             .order("id.desc")
             .limit(10)
             .execute()
-            .await;
-
-        match result {
-            Ok(resp) => {
-                let status = resp.status();
-                assert!(status.is_success() || status.as_u16() == 401);
+            .await
+        {
+            Ok(_resp) => {}
+            Err(e) if is_acceptable_error(&e) => {
+                println!("Test skipped: {e}");
             }
-            Err(e) => {
-                println!("Test skipped due to network error: {e}");
-            }
+            Err(e) => panic!("unexpected error: {e}"),
         }
     }
 
@@ -426,22 +405,19 @@ mod tests {
     async fn test_select_with_multiple_filters() {
         let client = client();
 
-        let result = client
+        match client
             .from("test_items")
             .select("*")
             .gte("value", "10")
             .lte("value", "100")
             .execute()
-            .await;
-
-        match result {
-            Ok(resp) => {
-                let status = resp.status();
-                assert!(status.is_success() || status.as_u16() == 401);
+            .await
+        {
+            Ok(_resp) => {}
+            Err(e) if is_acceptable_error(&e) => {
+                println!("Test skipped: {e}");
             }
-            Err(e) => {
-                println!("Test skipped due to network error: {e}");
-            }
+            Err(e) => panic!("unexpected error: {e}"),
         }
     }
 
@@ -449,29 +425,27 @@ mod tests {
     async fn test_in_filter() {
         let client = client();
 
-        let result = client
+        match client
             .from("test_items")
             .select("*")
             .in_("id", ["1", "2", "3"])
             .execute()
-            .await;
-
-        match result {
-            Ok(resp) => {
-                let status = resp.status();
-                assert!(status.is_success() || status.as_u16() == 401);
+            .await
+        {
+            Ok(_resp) => {}
+            Err(e) if is_acceptable_error(&e) => {
+                println!("Test skipped: {e}");
             }
-            Err(e) => {
-                println!("Test skipped due to network error: {e}");
-            }
+            Err(e) => panic!("unexpected error: {e}"),
         }
     }
 
     #[test]
-    fn test_db_error_display() {
-        // Verify error types display correctly
-        let json_err = serde_json::from_str::<i32>("invalid").unwrap_err();
-        let db_err = DbError::Serialization(json_err);
-        assert!(format!("{db_err}").contains("serialization error"));
+    fn test_error_display() {
+        let err = crate::Error::Api {
+            status: 400,
+            message: "bad request".into(),
+        };
+        assert!(format!("{err}").contains("400"));
     }
 }

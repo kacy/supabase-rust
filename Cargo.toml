@@ -1,20 +1,22 @@
 [package]
 name = "supabase-rust"
-version = "0.2.0"
+version = "0.3.0"
 authors = ["Kacy Fortner <kacy@kacyfortner.com>"]
 edition = "2021"
 description = "Rust client for Supabase"
 repository = "https://github.com/kacy/supabase-rust.git"
 homepage = "https://github.com/kacy/supabase-rust"
 license = "MIT"
+keywords = ["supabase", "postgrest", "auth", "client"]
+categories = ["api-bindings", "web-programming::http-client"]
 
 [dev-dependencies]
 rand = "0.9"
+tokio = { version = "1", features = ["rt", "macros"] }
 
 [dependencies]
 jsonwebtoken = "9.3"
 reqwest = { version = "0.12", features = ["json"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-time = "0.3.37"
-tokio = { version = "1", features = ["full"] }
+thiserror = "2"
