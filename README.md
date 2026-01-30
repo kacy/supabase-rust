@@ -18,15 +18,15 @@
 - [x] Client creation
 - [x] Sign-in email/pass
 - [x] Signup email/pass
-- [ ] Signup phone/pass
+- [x] Signup phone/pass
 - [x] Token refresh
 - [x] Logout
-- [ ] Verify one-time token
+- [x] Verify one-time token
 - [ ] Authorize external OAuth provicder
 - [ ] Password recovery
-- [ ] Resend one-time password over email or SMS
+- [x] Resend one-time password over email or SMS
 - [ ] Magic link authentication
-- [ ] One-time password authentication
+- [x] One-time password authentication
 - [ ] Retrieval of user's information
 - [ ] Reauthentication of a password change
 - [ ] Enrollment of MFA
