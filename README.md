@@ -23,7 +23,7 @@
 - [x] Logout
 - [x] Verify one-time token
 - [ ] Authorize external OAuth provicder
-- [ ] Password recovery
+- [x] Password recovery
 - [x] Resend one-time password over email or SMS
 - [ ] Magic link authentication
 - [x] One-time password authentication
